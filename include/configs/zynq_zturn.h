@@ -1,7 +1,7 @@
 /*
- * (C) Copyright 2013 Xilinx, Inc.
+ * (C) Copyright 2015 Xilinx, Inc.
  *
- * Configuration for Zynq Evaluation and Development Board - ZedBoard
+ * Configuration for MYIR Z-turn
  * See zynq-common.h for Zynq common configs
  *
  * SPDX-License-Identifier:	GPL-2.0+
@@ -10,18 +10,21 @@
 #ifndef __CONFIG_ZYNQ_ZTURN_H
 #define __CONFIG_ZYNQ_ZTURN_H
 
-//#define CONFIG_SYS_SDRAM_SIZE		(1024 * 1024 * 1024)
-#define	PHYS_SDRAM_1_SIZE	(1024 * 1024 * 1024)
+#define CONFIG_SYS_SDRAM_SIZE		(1024 * 1024 * 1024)
 
 #define CONFIG_ZYNQ_SERIAL_UART1
 #define CONFIG_ZYNQ_GEM0
-#define CONFIG_ZYNQ_GEM_PHY_ADDR0	0
+#define CONFIG_ZYNQ_GEM_PHY_ADDR0 0
 
 #define CONFIG_SYS_NO_FLASH
 
-#define CONFIG_ZYNQ_USB
 #define CONFIG_ZYNQ_SDHCI0
+#define CONFIG_ZYNQ_USB
+#define CONFIG_ZYNQ_BOOT_FREEBSD
+
 #define CONFIG_ZYNQ_QSPI
+
+#define	CONFIG_ZERO_BOOTDELAY_CHECK	1
 
 /*
  * QSPI flash mapping
@@ -37,16 +40,45 @@
  * 0xF90000 - 0xFFFFFF  0x070000  data(448KB)
  */
 #define CONFIG_ENV_OFFSET		0x080000
+
+
+/*
+   NOTE:  zynq-common.h is not consistent with the macro inclusion
+          -- The define's above need to be set before include
+          -- The define's below need to overwrite include
+*/
+
+#include <configs/zynq-common.h>
+
+
+#ifdef CONFIG_ENV_SIZE
+   #undef CONFIG_ENV_SIZE
+#endif
 #define CONFIG_ENV_SIZE			(128*1024)
+
+#ifdef CONFIG_ENV_SECT_SIZE
+   #undef CONFIG_ENV_SECT_SIZE
+#endif
 #define CONFIG_ENV_SECT_SIZE 	(4*1024) // W25Q128 is 4KB sector type
 
+#ifdef CONFIG_PHY_MARVELL
+   #undef CONFIG_PHY_MARVELL
+#endif
+#define CONFIG_PHY_ATHEROS
 
-#define CONFIG_ZYNQ_BOOT_FREEBSD
-#define CONFIG_DEFAULT_DEVICE_TREE	zynq-zturn
-
+#ifdef CONFIG_IPADDR
+   #undef CONFIG_IPADDR
+#endif
 #define CONFIG_IPADDR	192.168.1.55
+
+#ifdef CONFIG_SERVERIP
+   #undef CONFIG_SERVERIP
+#endif
 #define CONFIG_SERVERIP	192.168.1.13
 
+#ifdef CONFIG_EXTRA_ENV_SETTINGS
+   #undef CONFIG_EXTRA_ENV_SETTINGS
+#endif
 #define CONFIG_EXTRA_ENV_SETTINGS	\
 	"qboot_addr=0x000000\0" \
 	"qbootenv_addr=0x080000\0" \
@@ -69,21 +101,38 @@
 	"boot_image=BOOT.bin\0"	\
 	"loadbit_addr=0x100000\0"	\
 	"loadbootenv_addr=0x2000000\0" \
+	"kernel_size=0x500000\0"	\
+	"devicetree_size=0x20000\0"	\
+	"ramdisk_size=0x5E0000\0"	\
+	"boot_size=0xF00000\0"	\
 	"fdt_high=0x20000000\0"	\
 	"initrd_high=0x20000000\0"	\
 	"bootenv=uEnv.txt\0" \
-	"loadbootenv=fatload mmc 0 ${loadbootenv_addr} ${bootenv}\0" \
+	"loadbootenv=load mmc 0 ${loadbootenv_addr} ${bootenv}\0" \
 	"importbootenv=echo Importing environment from SD ...; " \
 		"env import -t ${loadbootenv_addr} $filesize\0" \
-	"mmc_loadbit_fat=echo Loading bitstream from SD/MMC/eMMC to RAM.. && " \
-		"get_bitstream_name && mmcinfo && " \
-		"fatload mmc 0 ${loadbit_addr} ${bitstream_image} && " \
-		"fpga loadb 0 ${loadbit_addr} ${filesize}\0" \
+	"sd_uEnvtxt_existence_test=test -e mmc 0 /uEnv.txt\0" \
+	"preboot=if test $modeboot = sdboot && env run sd_uEnvtxt_existence_test; " \
+			"then if env run loadbootenv; " \
+				"then env run importbootenv; " \
+			"fi; " \
+		"fi; \0" \
+	"mmc_loadbit=echo Loading bitstream from SD/MMC/eMMC to RAM.. && " \
+		"mmcinfo && " \
+		"load mmc 0 ${loadbit_addr} ${bitstream_image} && " \
+		"fpga load 0 ${loadbit_addr} ${filesize}\0" \
 	"norboot=echo Copying Linux from NOR flash to RAM... && " \
 		"cp.b 0xE2100000 ${kernel_load_address} ${kernel_size} && " \
 		"cp.b 0xE2600000 ${devicetree_load_address} ${devicetree_size} && " \
 		"echo Copying ramdisk... && " \
 		"cp.b 0xE2620000 ${ramdisk_load_address} ${ramdisk_size} && " \
+		"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}\0" \
+	"qspiboot=echo Copying Linux from QSPI flash to RAM... && " \
+		"sf probe 0 0 0 && " \
+		"sf read ${kernel_load_address} 0x100000 ${kernel_size} && " \
+		"sf read ${devicetree_load_address} 0x600000 ${devicetree_size} && " \
+		"echo Copying ramdisk... && " \
+		"sf read ${ramdisk_load_address} 0x620000 ${ramdisk_size} && " \
 		"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}\0" \
 	"uenvboot=" \
 		"if run loadbootenv; then " \
@@ -96,22 +145,17 @@
 		"fi\0" \
 	"sdboot=if mmcinfo; then " \
 			"run uenvboot; " \
-			"get_bitstream_name && " \
-			"echo - load ${bitname} to PL... && " \
-			"fatload mmc 0 0x200000 ${bitname} && " \
-			"fpga loadb 0 0x200000 ${filesize} && " \
-			"echo Copying Linux from SD to RAM... && " \
-			"fatload mmc 0 ${kernel_load_address} ${kernel_image} && " \
-			"fatload mmc 0 ${devicetree_load_address} ${devicetree_image} && " \
-			"fatload mmc 0 ${ramdisk_load_address} ${ramdisk_image} && " \
-			"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}; " \
+			"echo Copying Linux from SD to RAM...RFS in ext4 && " \
+			"load mmc 0 ${kernel_load_address} ${kernel_image} && " \
+			"load mmc 0 ${devicetree_load_address} ${devicetree_image} && " \
+			"bootm ${kernel_load_address} - ${devicetree_load_address}; " \
 		"fi\0" \
 	"usbboot=if usb start; then " \
 			"run uenvboot; " \
 			"echo Copying Linux from USB to RAM... && " \
-			"fatload usb 0 ${kernel_load_address} ${kernel_image} && " \
-			"fatload usb 0 ${devicetree_load_address} ${devicetree_image} && " \
-			"fatload usb 0 ${ramdisk_load_address} ${ramdisk_image} && " \
+			"load usb 0 ${kernel_load_address} ${kernel_image} && " \
+			"load usb 0 ${devicetree_load_address} ${devicetree_image} && " \
+			"load usb 0 ${ramdisk_load_address} ${ramdisk_image} && " \
 			"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}; " \
 		"fi\0" \
 	"nandboot=echo Copying Linux from NAND flash to RAM... && " \
@@ -139,51 +183,13 @@
 		"zynqrsa 0x100000 && " \
 		"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}\0" \
 	"rsa_sdboot=echo Copying Image from SD to RAM... && " \
-		"fatload mmc 0 0x100000 ${boot_image} && " \
+		"load mmc 0 0x100000 ${boot_image} && " \
 		"zynqrsa 0x100000 && " \
 		"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}\0" \
 	"rsa_jtagboot=echo TFTPing Image to RAM... && " \
 		"tftpboot 0x100000 ${boot_image} && " \
 		"zynqrsa 0x100000 && " \
 		"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}\0" \
-	"qspiboot=echo Copying Linux from QSPI flash to RAM... && " \
-		"sf probe 0 0 0 && " \
-		"qspi_get_bitsize 0x0A0000 && " \
-		"sf read ${loadbit_addr} 0x0A0004 ${bitsize} && " \
-		"fpga loadb 0 ${loadbit_addr} ${bitsize} && " \
-		"sf read ${kernel_load_address} ${qkernel_addr} ${kernel_size} && " \
-		"sf read ${devicetree_load_address} ${qdevtree_addr} ${devicetree_size} && " \
-		"echo Copying ramdisk... && " \
-		"sf read ${ramdisk_load_address} ${qramdisk_addr} ${ramdisk_size} && " \
-		"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}\0" \
-	"qspiupdate=echo Update qspi images from sd card... && " \
-		"echo - Init mmc... && mmc rescan && " \
-		"echo - Init qspi flash... && sf probe 0 0 0 && " \
-		"echo - Write boot.bin... && " \
-		"fatload mmc 0 0x200000 boot.bin && " \
-		"sf erase ${qboot_addr} ${boot_size} && " \
-		"sf erase ${qbootenv_addr} ${qbootenv_size} && " \
-		"sf write 0x200000 0 ${filesize} && " \
-		"get_bitstream_name && " \
-		"echo - Write ${bitstream_image}... && " \
-		"fatload mmc 0 0x200000 ${bitstream_image} && " \
-		"sf erase 0x0A0000 0x460000 && " \
-		"mw.l 0x100000 ${filesize} && " \
-		"sf write 0x100000 0x0A0000 4 && " \
-		"sf write 0x200000 0x0A0004 ${filesize} && " \
-		"echo - Write uImage... && " \
-		"fatload mmc 0 0x200000 uImage && " \
-		"sf erase ${qkernel_addr} ${kernel_size} && " \
-		"sf write 0x200000 ${qkernel_addr} ${filesize} && " \
-		"echo - Write device tree... && " \
-		"fatload mmc 0 0x200000 devicetree.dtb && " \
-		"sf erase ${qdevtree_addr} ${devicetree_size} && " \
-		"sf write 0x200000 ${qdevtree_addr} ${filesize} && " \
-		"echo - Write Ramdisk... && " \
-		"fatload mmc 0 0x200000 uramdisk.image.gz && " \
-		"sf erase ${qramdisk_addr} ${ramdisk_size} && " \
-		"sf write 0x200000 ${qramdisk_addr} ${filesize} && " \
-		"echo - Done.\0"
-#include <configs/zynq_common.h>
+		DFU_ALT_INFO
 
-#endif /* __CONFIG_ZYNQ_ZED_H */
+#endif /* __CONFIG_ZYNQ_ZTURN_H */
