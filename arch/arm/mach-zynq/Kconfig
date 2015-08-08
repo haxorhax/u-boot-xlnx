@@ -79,6 +79,6 @@ config SYS_CONFIG_NAME
 	default "zynq_cse" if TARGET_ZYNQ_CSE
 	default "zynq_afx" if TARGET_ZYNQ_AFX
 	default "zynq_cc108" if TARGET_ZYNQ_CC108
-    default "zynq_zturn" if TARGET_ZYNQ_ZTURN
+        default "zynq_zturn" if TARGET_ZYNQ_ZTURN
 
 endif
