@@ -223,7 +223,9 @@
 #endif
 
 /* Total Size of Environment Sector */
+#ifndef CONFIG_ENV_SIZE
 #define CONFIG_ENV_SIZE			(128 << 10)
+#endif
 
 /* Allow to overwrite serial and ethaddr */
 #define CONFIG_ENV_OVERWRITE
@@ -243,7 +245,10 @@
 #  define CONFIG_ENV_IS_NOWHERE
 # endif
 
+#ifndef CONFIG_ENV_SECT_SIZE
 # define CONFIG_ENV_SECT_SIZE		CONFIG_ENV_SIZE
+#endif
+
 # ifndef CONFIG_ENV_OFFSET
 #  define CONFIG_ENV_OFFSET		0xE0000
 # endif
@@ -251,6 +256,7 @@
 #endif
 
 /* Default environment */
+#ifndef CONFIG_EXTRA_ENV_SETTINGS /*Added by MYIR*/
 #define CONFIG_EXTRA_ENV_SETTINGS	\
 	"ethaddr=00:0a:35:00:01:22\0"	\
 	"kernel_image=uImage\0"	\
@@ -354,10 +360,15 @@
 		"zynqrsa 0x100000 && " \
 		"bootm ${kernel_load_address} ${ramdisk_load_address} ${devicetree_load_address}\0" \
 		DFU_ALT_INFO
+#endif /* ifndef CONFIG_EXTRA_ENV_SETTINGS, MYIR */
 
 /* Default environment */
-#define CONFIG_IPADDR	10.10.70.102
-#define CONFIG_SERVERIP	10.10.70.101
+#ifndef CONFIG_IPADDR	/* Added by MYIR */
+	#define CONFIG_IPADDR	10.10.70.102
+#endif
+#ifndef CONFIG_SERVERIP /* Added by MYIR */
+	#define CONFIG_SERVERIP	10.10.70.101
+#endif
 
 /* default boot is according to the bootmode switch settings */
 #if defined(CONFIG_CMD_ZYNQ_RSA)
@@ -367,6 +378,7 @@
 #endif
 #define CONFIG_BOOTDELAY		3 /* -1 to Disable autoboot */
 #define CONFIG_SYS_LOAD_ADDR		0 /* default? */
+#define	CONFIG_ZERO_BOOTDELAY_CHECK	1
 
 /* Miscellaneous configurable options */
 #define CONFIG_SYS_PROMPT		"zynq-uboot> "

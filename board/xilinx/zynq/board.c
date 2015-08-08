@@ -29,6 +29,9 @@ static xilinx_desc fpga045 = XILINX_XC7Z045_DESC(0x45);
 static xilinx_desc fpga100 = XILINX_XC7Z100_DESC(0x100);
 #endif
 
+/* Added by MYIR for MYS-XC7Z010 */
+extern int myir_board_init(void);
+
 int board_init(void)
 {
 #if defined(CONFIG_ENV_IS_IN_EEPROM) && !defined(CONFIG_SPL_BUILD)
@@ -74,6 +77,10 @@ int board_init(void)
 	if (eeprom_write(CONFIG_SYS_I2C_MUX_ADDR, 0, &eepromsel, 1))
 		puts("I2C:EEPROM selection failed\n");
 #endif
+
+	/* Added by MYIR for MYS-XC7Z010 */
+	myir_board_init();
+
 	return 0;
 }
 

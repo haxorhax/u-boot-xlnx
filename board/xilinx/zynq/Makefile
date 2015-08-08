@@ -6,6 +6,7 @@
 #
 
 obj-y	:= board.o
+obj-y	+= myir_init.o
 
 # Please copy ps7_init_gpl.c/h from hw project to this directory
 obj-$(CONFIG_SPL_BUILD) += \
