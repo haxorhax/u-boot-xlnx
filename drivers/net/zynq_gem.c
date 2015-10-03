@@ -23,6 +23,7 @@
 #include <asm/system.h>
 #include <asm/arch/hardware.h>
 #include <asm/arch/sys_proto.h>
+#include <asm-generic/errno.h>
 
 #if !defined(CONFIG_PHYLIB)
 # error XILINX_GEM_ETHERNET requires PHYLIB
@@ -46,6 +47,7 @@
 /* Wrap bit, last descriptor */
 #define ZYNQ_GEM_TXBUF_WRAP_MASK	0x40000000
 #define ZYNQ_GEM_TXBUF_LAST_MASK	0x00008000 /* Last buffer */
+#define ZYNQ_GEM_TXBUF_USED_MASK	0x80000000 /* Used by Hw */
 
 #define ZYNQ_GEM_NWCTRL_TXEN_MASK	0x00000008 /* Enable transmit */
 #define ZYNQ_GEM_NWCTRL_RXEN_MASK	0x00000004 /* Enable receive */
@@ -57,11 +59,10 @@
 #define ZYNQ_GEM_NWCFG_FDEN		0x000000002 /* Full Duplex mode */
 #define ZYNQ_GEM_NWCFG_FSREM		0x000020000 /* FCS removal */
 #ifdef CONFIG_ARM64
-#define ZYNQ_GEM_NWCFG_MDCCLKDIV	0x0001C0000 /* Div pclk by 224, 540MHz */
+#define ZYNQ_GEM_NWCFG_MDCCLKDIV	0x000100000 /* Div pclk by 64, max 160MHz */
 #else
-#define ZYNQ_GEM_NWCFG_MDCCLKDIV	0x000080000 /* Div pclk by 32, 80MHz */
+#define ZYNQ_GEM_NWCFG_MDCCLKDIV	0x0000c0000 /* Div pclk by 48, max 120MHz */
 #endif
-#define ZYNQ_GEM_NWCFG_MDCCLKDIV2	0x0000c0000 /* Div pclk by 48, 120MHz */
 
 #ifdef CONFIG_ARM64
 # define ZYNQ_GEM_DBUS_WIDTH	(1 << 21) /* 64 bit bus */
@@ -88,6 +89,8 @@
 					ZYNQ_GEM_DMACR_RXSIZE | \
 					ZYNQ_GEM_DMACR_TXSIZE | \
 					ZYNQ_GEM_DMACR_RXBUF)
+
+#define ZYNQ_GEM_TSR_DONE		0x00000020 /* Tx done mask */
 
 /* Use MII register 1 (MII status register) to detect PHY */
 #define PHY_DETECT_REG  1
@@ -148,7 +151,7 @@ struct emac_bd {
  */
 #define BD_SPACE	0x100000
 /* BD separation space */
-#define BD_SEPRN_SPACE	64
+#define BD_SEPRN_SPACE	(RX_BUF * sizeof(struct emac_bd))
 
 /* Initialized, rxbd_current, rx_first_buf must be 0 after init */
 struct zynq_gem_priv {
@@ -373,8 +376,8 @@ static int zynq_gem_init(struct eth_device *dev, bd_t * bis)
 		clk_rate = ZYNQ_GEM_FREQUENCY_1000;
 		break;
 	case SPEED_100:
-		clrsetbits_le32(&regs->nwcfg, ZYNQ_GEM_NWCFG_SPEED1000,
-				ZYNQ_GEM_NWCFG_INIT | ZYNQ_GEM_NWCFG_SPEED100);
+		writel(ZYNQ_GEM_NWCFG_INIT | ZYNQ_GEM_NWCFG_SPEED100,
+		       &regs->nwcfg);
 		clk_rate = ZYNQ_GEM_FREQUENCY_100;
 		break;
 	case SPEED_10:
@@ -388,7 +391,7 @@ static int zynq_gem_init(struct eth_device *dev, bd_t * bis)
 					ZYNQ_GEM_BASEADDR0, clk_rate);
 
 	/* set hardware address because of ... */
-	if (!is_valid_ether_addr(dev->enetaddr)) {
+	if (!is_valid_ethaddr(dev->enetaddr)) {
 		printf("%s: mac address is not valid\n", dev->name);
 		return -1;
 	}
@@ -401,22 +404,54 @@ static int zynq_gem_init(struct eth_device *dev, bd_t * bis)
 	return 0;
 }
 
+static inline int wait_for_bit(const char *func, u32 *reg, const u32 mask,
+			       bool set, unsigned int timeout)
+{
+	u32 val;
+	unsigned long start = get_timer(0);
+
+	while(1) {
+		val = readl(reg);
+
+		if (!set)
+			val = ~val;
+
+		if ((val & mask) == mask)
+			return 0;
+
+		if (get_timer(start) > timeout)
+			break;
+
+		udelay(1);
+	}
+
+	debug("%s: Timeout (reg=%p mask=%08x wait_set=%i)\n",
+	      func, reg, mask, set);
+
+	return -ETIMEDOUT;
+}
+
 static int zynq_gem_send(struct eth_device *dev, void *ptr, int len)
 {
 	u32 addr, size;
 	struct zynq_gem_priv *priv = dev->priv;
 	struct zynq_gem_regs *regs = (struct zynq_gem_regs *)dev->iobase;
-
-	/* setup BD */
-	writel((u32)priv->tx_bd, &regs->txqbase);
+	struct emac_bd *current_bd = &priv->tx_bd[1];
 
 	/* Setup Tx BD */
 	memset(priv->tx_bd, 0, sizeof(struct emac_bd));
 
 	priv->tx_bd->addr = (u32)ptr;
 	priv->tx_bd->status = (len & ZYNQ_GEM_TXBUF_FRMLEN_MASK) |
-			       ZYNQ_GEM_TXBUF_LAST_MASK |
-			       ZYNQ_GEM_TXBUF_WRAP_MASK;
+			       ZYNQ_GEM_TXBUF_LAST_MASK;
+	/* Dummy descriptor to mark it as the last in descriptor chain */
+	current_bd->addr = 0x0;
+	current_bd->status = ZYNQ_GEM_TXBUF_WRAP_MASK |
+			     ZYNQ_GEM_TXBUF_LAST_MASK|
+			     ZYNQ_GEM_TXBUF_USED_MASK;
+
+	/* setup BD */
+	writel((u32)priv->tx_bd, &regs->txqbase);
 
 	addr = (u32) ptr;
 	addr &= ~(ARCH_DMA_MINALIGN - 1);
@@ -433,12 +468,11 @@ static int zynq_gem_send(struct eth_device *dev, void *ptr, int len)
 	setbits_le32(&regs->nwctrl, ZYNQ_GEM_NWCTRL_STARTTX_MASK);
 
 	/* Read TX BD status */
-	if (priv->tx_bd->status & ZYNQ_GEM_TXBUF_UNDERRUN)
-		printf("TX underrun\n");
 	if (priv->tx_bd->status & ZYNQ_GEM_TXBUF_EXHAUSTED)
 		printf("TX buffers exhausted in mid frame\n");
 
-	return 0;
+	return wait_for_bit(__func__, &regs->txsr, ZYNQ_GEM_TSR_DONE,
+			    true, 20000);
 }
 
 /* Do not check frame_recd flag in rx_status register 0x20 - just poll BD */
@@ -463,7 +497,7 @@ static int zynq_gem_recv(struct eth_device *dev)
 		u32 addr = current_bd->addr & ZYNQ_GEM_RXBUF_ADD_MASK;
 		addr &= ~(ARCH_DMA_MINALIGN - 1);
 
-		NetReceive((u8 *)addr, frame_len);
+		net_process_received_packet((u8 *)addr, frame_len);
 
 		if (current_bd->status & ZYNQ_GEM_RXBUF_SOF_MASK)
 			priv->rx_first_buf = priv->rxbd_current;

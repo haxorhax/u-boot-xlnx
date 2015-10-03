@@ -6,9 +6,11 @@
  */
 
 #include <common.h>
+#include <dwc3-uboot.h>
 #include <netdev.h>
 #include <ahci.h>
 #include <scsi.h>
+#include <usb.h>
 #include <asm/arch/hardware.h>
 #include <asm/arch/sys_proto.h>
 #include <asm/io.h>
@@ -58,7 +60,7 @@ void reset_cpu(ulong addr)
 #ifdef CONFIG_SCSI_AHCI_PLAT
 void scsi_init(void)
 {
-	ahci_init(ZYNQMP_SATA_BASEADDR);
+	ahci_init((void __iomem *)ZYNQMP_SATA_BASEADDR);
 	scsi_scan(1);
 }
 #endif
@@ -117,18 +119,14 @@ int board_late_init(void)
 
 	switch (ver) {
 	case ZYNQMP_CSU_VERSION_VELOCE:
-		setenv("baudrate", "4800");
-		setenv("bootcmd", "run veloce");
+		setenv("setup", "setenv baudrate 4800 && setenv bootcmd run veloce");
 	case ZYNQMP_CSU_VERSION_EP108:
-		setenv("serverip", "10.10.70.101");
-		setenv("ipaddr", "10.10.71.100");
-		setenv("partid", "auto");
+	case ZYNQMP_CSU_VERSION_SILICON:
+		setenv("setup", "setenv serverip 10.10.70.101 && setenv ipaddr 10.10.71.100 && setenv partid auto");
 		break;
 	case ZYNQMP_CSU_VERSION_QEMU:
 	default:
-		setenv("serverip", "10.0.2.2");
-		setenv("ipaddr", "10.0.2.15");
-		setenv("partid", "0");
+		setenv("setup", "setenv serverip 10.0.2.2 && setenv ipaddr 10.0.2.15 && setenv partid 0");
 	}
 
 	reg = readl(&crlapb_base->boot_mode);
@@ -156,3 +154,35 @@ int board_late_init(void)
 
 	return 0;
 }
+
+int checkboard(void)
+{
+	puts("Board:\tXilinx ZynqMP\n");
+	return 0;
+}
+
+#ifdef CONFIG_USB_DWC3
+static struct dwc3_device dwc3_device_data = {
+	.maximum_speed = USB_SPEED_HIGH,
+	.base = ZYNQMP_USB0_XHCI_BASEADDR,
+	.dr_mode = USB_DR_MODE_PERIPHERAL,
+	.index = 0,
+};
+
+int usb_gadget_handle_interrupts(void)
+{
+	dwc3_uboot_handle_interrupt(0);
+	return 0;
+}
+
+int board_usb_init(int index, enum usb_init_type init)
+{
+	return dwc3_uboot_init(&dwc3_device_data);
+}
+
+int board_usb_cleanup(int index, enum usb_init_type init)
+{
+	dwc3_uboot_exit(index);
+	return 0;
+}
+#endif

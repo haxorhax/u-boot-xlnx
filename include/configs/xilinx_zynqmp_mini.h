@@ -1,7 +1,5 @@
 /*
- * Configuration for Xilinx ZynqMP Flash
- * utility. See zynqmp-common.h for ZynqMP
- * common configs
+ * Configuration for Xilinx ZynqMP Flash utility
  *
  * (C) Copyright 2014 - 2015 Xilinx, Inc.
  * Michal Simek <michal.simek@xilinx.com>
@@ -29,8 +27,6 @@
 #undef CONFIG_OF_LIBFDT
 #undef CONFIG_EXTRA_ENV_SETTINGS
 #undef CONFIG_BOARD_LATE_INIT
-#undef CONFIG_FIT
-#undef CONFIG_FIT_VERBOSE
 #undef CONFIG_CMD_BOOTZ
 #undef CONFIG_BOOTCOMMAND
 #undef CONFIG_SYS_HUSH_PARSER
